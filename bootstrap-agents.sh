@@ -122,6 +122,8 @@ ASSET_DATA_JSON
 ```
 ```
 
+**CRITICAL**: The `ASSET_DATA_JSON` section above is MANDATORY. You MUST always include it at the end of your response, with every identified asset as a JSON object inside a fenced ```json block. The downstream pipeline parses this block to populate portfolio charts. If you omit it, no chart data will be recorded. Include ALL assets: equities, ETFs, bonds, cash/money-market, and real estate (use estimated values when exact valuations are unavailable).
+
 ## Handling Edge Cases
 
 - **Multi-currency portfolios**: Always convert to a base currency for comparison if exchange rates are provided or can be inferred; otherwise, show values in original currencies and note the limitation

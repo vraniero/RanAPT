@@ -22,14 +22,6 @@ pip3 install streamlit plotly pandas python-dateutil pdfplumber reportlab openpy
 
 Prerequisite: the `claude` CLI must be installed and authenticated (`claude auth`).
 
-## Investor profile (important context)
-
-- **Owner**: Raniero Virgilio; base currency EUR; domicile Berlin, Germany
-- **ETF portfolio** (Revolut): EDFS (Amundi European Defense), IBCI (iShares Euro Inflation-Linked Bonds), VUAA (Vanguard S&P 500 Acc), LYP6 (Amundi STOXX Europe 600)
-- **Equities**: MSFT (125 shares, cost basis $64.64)
-- **Real estate**: 2× Berlin buy-to-let — Landsberger Allee 16 (LTV 49.9%), Esmarchstraße 12 (LTV 73.8%)
-- **Cash**: ~€60K in Revolut Flexible Cash Fund
-- **Tax**: German Abgeltungsteuer (26.375% flat on capital gains)
 
 ## Streamlit app architecture
 

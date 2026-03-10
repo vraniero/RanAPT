@@ -121,6 +121,10 @@ def init_db() -> None:
         conn.execute("ALTER TABLE snapshots ADD COLUMN real_estate_folder TEXT")
     if "agents_config" not in cols:
         conn.execute("ALTER TABLE snapshots ADD COLUMN agents_config TEXT")
+    # watch_events: add status column
+    we_cols = [row[1] for row in conn.execute("PRAGMA table_info(watch_events)").fetchall()]
+    if "status" not in we_cols:
+        conn.execute("ALTER TABLE watch_events ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
     conn.commit()
     conn.close()
 

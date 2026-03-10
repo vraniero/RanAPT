@@ -371,6 +371,28 @@ def get_all_watch_events() -> list[sqlite3.Row]:
     return rows
 
 
+def update_watch_event_status(event_id: int, status: str) -> None:
+    """Update a watch event's status (active, archived, low_priority)."""
+    conn = get_connection()
+    conn.execute("UPDATE watch_events SET status=? WHERE id=?", (status, event_id))
+    conn.commit()
+    conn.close()
+
+
+def archive_past_watch_events() -> int:
+    """Auto-archive active events whose date has passed. Returns count of archived events."""
+    conn = get_connection()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cur = conn.execute(
+        "UPDATE watch_events SET status='archived' WHERE status='active' AND event_date < ?",
+        (today,),
+    )
+    count = cur.rowcount
+    conn.commit()
+    conn.close()
+    return count
+
+
 def get_watch_events_for_snapshot(snapshot_id: int) -> list[sqlite3.Row]:
     conn = get_connection()
     rows = conn.execute(

@@ -17,6 +17,9 @@ MODEL_OPTIONS = ["haiku", "sonnet", "opus"]
 st.title("Watch List")
 st.markdown("Upcoming events identified by the **Global Financial Intelligence** agent.")
 
+# Auto-archive past events
+queries.archive_past_watch_events()
+
 events = queries.get_all_watch_events()
 
 if not events:
@@ -31,14 +34,22 @@ for e in events:
         ed["_date"] = datetime.strptime(ed["event_date"], "%Y-%m-%d").date()
     except (ValueError, TypeError):
         continue
+    ed["status"] = ed.get("status") or "active"
     parsed_events.append(ed)
 
 if not parsed_events:
     st.info("No valid events found.")
     st.stop()
 
+# Filter controls
+show_archived = st.checkbox("Show archived events", value=False, key="show_archived")
+visible_events = [e for e in parsed_events if show_archived or e["status"] != "archived"]
+
 # ── Month navigation ──────────────────────────────────────────────────────────
-all_dates = [e["_date"] for e in parsed_events]
+all_dates = [e["_date"] for e in visible_events]
+if not all_dates:
+    st.info("No active events. Enable **Show archived events** to see past items.")
+    st.stop()
 min_date = min(all_dates)
 max_date = max(all_dates)
 
@@ -77,7 +88,7 @@ year = st.session_state.cal_year
 month = st.session_state.cal_month
 
 # Events for this month
-month_events = [e for e in parsed_events if e["_date"].year == year and e["_date"].month == month]
+month_events = [e for e in visible_events if e["_date"].year == year and e["_date"].month == month]
 events_by_day = {}
 for e in month_events:
     day = e["_date"].day
@@ -121,14 +132,24 @@ for week in month_days:
                 # Show day number with event indicator
                 event_dots = ""
                 for ev in day_events:
-                    color = IMPACT_COLORS.get(ev.get("impact", ""), "gray")
-                    event_dots += f" :{color}[●]"
+                    if ev["status"] == "archived":
+                        event_dots += " :gray[○]"
+                    elif ev["status"] == "low_priority":
+                        event_dots += " :gray[●]"
+                    else:
+                        color = IMPACT_COLORS.get(ev.get("impact", ""), "gray")
+                        event_dots += f" :{color}[●]"
                 is_today = (day == today.day and month == today.month and year == today.year)
                 day_label = f"**{day}**" if is_today else str(day)
                 st.markdown(f"{day_label}{event_dots}")
                 for ev in day_events:
-                    color = IMPACT_COLORS.get(ev.get("impact", ""), "gray")
-                    st.markdown(f":{color}[{ev['title'][:20]}]", help=ev.get("description", ""))
+                    if ev["status"] == "archived":
+                        st.markdown(f":gray[~~{ev['title'][:20]}~~]", help=ev.get("description", ""))
+                    elif ev["status"] == "low_priority":
+                        st.markdown(f":gray[{ev['title'][:20]}]", help=ev.get("description", ""))
+                    else:
+                        color = IMPACT_COLORS.get(ev.get("impact", ""), "gray")
+                        st.markdown(f":{color}[{ev['title'][:20]}]", help=ev.get("description", ""))
             else:
                 is_today = (day == today.day and month == today.month and year == today.year)
                 st.markdown(f"**{day}**" if is_today else str(day))
@@ -136,10 +157,10 @@ for week in month_days:
 st.divider()
 
 # ── Event list with details ──────────────────────────────────────────────────
-st.subheader("All Upcoming Events")
+st.subheader("Events")
 
 # Sort by date
-sorted_events = sorted(parsed_events, key=lambda e: e["_date"])
+sorted_events = sorted(visible_events, key=lambda e: e["_date"])
 
 # Get latest portfolio context for scenario analysis
 _portfolio_context = ""
@@ -153,21 +174,43 @@ for _snap in _latest_snapshots:
 
 _needs_poll = False
 
+STATUS_LABELS = {"active": "", "archived": " :gray[(archived)]", "low_priority": " :gray[(low priority)]"}
+
 for ev in sorted_events:
     impact = ev.get("impact", "medium")
-    color = IMPACT_COLORS.get(impact, "gray")
+    ev_status = ev.get("status", "active")
+    color = "gray" if ev_status in ("archived", "low_priority") else IMPACT_COLORS.get(impact, "gray")
     category = CATEGORY_LABELS.get(ev.get("category", ""), ev.get("category", ""))
     snap_label = ev.get("label") or f"Assessment #{ev['snapshot_id']}"
     snap_date = (ev.get("snapshot_created_at") or "")[:10]
     ev_id = ev["id"]
+    status_suffix = STATUS_LABELS.get(ev_status, "")
 
-    with st.expander(f":{color}[{impact.upper()}] **{ev['title']}** — {ev['event_date']}"):
+    with st.expander(f":{color}[{impact.upper()}] **{ev['title']}** — {ev['event_date']}{status_suffix}"):
         st.markdown(ev.get("description") or "No description.")
         st.caption(
             f"Category: **{category}** · Impact: **{impact}** · "
             f"Source: [{snap_label}]({''}) ({snap_date})"
         )
         st.caption(f"From assessment **#{ev['snapshot_id']}** — {snap_label} — run on {snap_date}")
+
+        # Status actions
+        status_cols = st.columns(4)
+        with status_cols[0]:
+            if ev_status != "active":
+                if st.button("Mark active", key=f"active_{ev_id}"):
+                    queries.update_watch_event_status(ev_id, "active")
+                    st.rerun()
+        with status_cols[1]:
+            if ev_status != "low_priority":
+                if st.button("Low priority", key=f"low_{ev_id}"):
+                    queries.update_watch_event_status(ev_id, "low_priority")
+                    st.rerun()
+        with status_cols[2]:
+            if ev_status != "archived":
+                if st.button("Archive", key=f"archive_{ev_id}"):
+                    queries.update_watch_event_status(ev_id, "archived")
+                    st.rerun()
 
         # Suggested actions via scenario-analyst
         running_key = f"actions_running_{ev_id}"

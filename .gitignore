@@ -13,4 +13,6 @@ build/
 venv/
 .ranapt/
 .claude/agent-memory/
+.claude/agents/
 .claude/settings.local.json
+.vscode/launch.json

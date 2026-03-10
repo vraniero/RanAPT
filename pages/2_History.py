@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import streamlit as st
@@ -16,6 +16,93 @@ snapshots = queries.list_snapshots()
 if not snapshots:
     st.info("No assessments yet. Go to **New Assessment** to run your first analysis.")
     st.stop()
+
+# ── Total Net Worth ───────────────────────────────────────────────────────────
+nw_history = queries.get_net_worth_history()
+
+if nw_history:
+    latest = nw_history[-1]
+    current_nw = latest["total_value_eur"]
+
+    PERIOD_OPTIONS = {
+        "Previous": None,
+        "1 Week": 7,
+        "1 Month": 30,
+        "3 Months": 90,
+        "6 Months": 180,
+        "1 Year": 365,
+        "Custom date": "custom",
+    }
+
+    col_nw, col_period, col_custom = st.columns([3, 1, 1])
+
+    with col_period:
+        period_label = st.selectbox(
+            "Compare to", list(PERIOD_OPTIONS.keys()), key="nw_period"
+        )
+
+    with col_custom:
+        if period_label == "Custom date":
+            earliest_dt = datetime.fromisoformat(nw_history[0]["created_at"].replace("Z", "")).date()
+            custom_date = st.date_input(
+                "Date",
+                value=earliest_dt,
+                min_value=earliest_dt,
+                max_value=datetime.utcnow().date(),
+                key="nw_custom_date",
+            )
+
+    # Find comparison snapshot
+    comparison_nw = None
+    comparison_date = None
+    period_value = PERIOD_OPTIONS[period_label]
+
+    if period_value is None:
+        # "Previous" — just the second-to-last snapshot
+        if len(nw_history) >= 2:
+            prev = nw_history[-2]
+            comparison_nw = prev["total_value_eur"]
+            comparison_date = prev["created_at"][:10]
+    elif period_value == "custom":
+        # Custom date — find the snapshot closest to the picked date
+        cutoff = datetime.combine(custom_date, datetime.min.time())
+        best = None
+        for row in nw_history[:-1]:
+            row_dt = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00").replace("+00:00", ""))
+            if best is None or abs((row_dt - cutoff).total_seconds()) < abs((best[0] - cutoff).total_seconds()):
+                best = (row_dt, row)
+        if best:
+            comparison_nw = best[1]["total_value_eur"]
+            comparison_date = best[1]["created_at"][:10]
+    else:
+        # Find the snapshot closest to (now - days)
+        cutoff = datetime.utcnow() - timedelta(days=period_value)
+        best = None
+        for row in nw_history[:-1]:  # exclude latest
+            row_dt = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00").replace("+00:00", ""))
+            if best is None or abs((row_dt - cutoff).total_seconds()) < abs((best[0] - cutoff).total_seconds()):
+                best = (row_dt, row)
+        if best:
+            comparison_nw = best[1]["total_value_eur"]
+            comparison_date = best[1]["created_at"][:10]
+
+    with col_nw:
+        if comparison_nw is not None and comparison_nw != 0:
+            delta = current_nw - comparison_nw
+            delta_pct = (delta / comparison_nw) * 100
+            color = "green" if delta >= 0 else "red"
+            arrow = "\u25B2" if delta >= 0 else "\u25BC"
+            st.metric(
+                label="Total Net Worth",
+                value=f"\u20ac{current_nw:,.0f}",
+            )
+            st.markdown(
+                f":{color}[{arrow} \u20ac{delta:+,.0f} ({delta_pct:+.1f}%) vs {comparison_date}]"
+            )
+        else:
+            st.metric(label="Total Net Worth", value=f"\u20ac{current_nw:,.0f}")
+
+    st.divider()
 
 # ── Portfolio Value Trend Chart ────────────────────────────────────────────────
 asset_data = queries.get_portfolio_assets_over_time()

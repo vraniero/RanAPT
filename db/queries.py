@@ -232,6 +232,22 @@ def get_portfolio_totals_over_time() -> list[sqlite3.Row]:
     return rows
 
 
+def get_net_worth_history() -> list[sqlite3.Row]:
+    """Returns (snapshot_id, created_at, label, total_value_eur) for all completed snapshots, oldest first."""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT s.id as snapshot_id, s.created_at, s.label,
+                  SUM(a.total_value_eur) as total_value_eur
+           FROM snapshots s
+           JOIN asset_items a ON a.snapshot_id = s.id
+           WHERE s.status = 'completed' AND a.total_value_eur IS NOT NULL
+           GROUP BY s.id
+           ORDER BY s.created_at""",
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 def get_portfolio_breakdown_over_time() -> list[sqlite3.Row]:
     """Returns (snapshot_id, created_at, label, asset_type, type_value_eur) per snapshot+type."""
     conn = get_connection()

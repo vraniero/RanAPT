@@ -6,6 +6,7 @@ stays responsive. The UI polls the ScanJob state to show progress.
 
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from ingestion.file_scanner import scan_folder, ScannedFile
@@ -19,6 +20,7 @@ class ParsedFile:
     path: Path
     file_type: str
     size: int
+    modified: datetime
     text: str  # extracted text content
     error: str | None = None
 
@@ -156,7 +158,7 @@ class ScanJob:
                     with self._lock:
                         self._parsed_files.append(ParsedFile(
                             name=sf.name, path=sf.path, file_type=sf.file_type,
-                            size=sf.size, text="",
+                            size=sf.size, modified=sf.modified, text="",
                         ))
                     continue
 
@@ -176,7 +178,7 @@ class ScanJob:
                 with self._lock:
                     self._parsed_files.append(ParsedFile(
                         name=sf.name, path=sf.path, file_type=sf.file_type,
-                        size=sf.size, text=text, error=error,
+                        size=sf.size, modified=sf.modified, text=text, error=error,
                     ))
                     self._files_parsed += 1
 

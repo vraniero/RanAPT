@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -20,6 +21,7 @@ class ScannedFile:
     path: Path
     file_type: str
     size: int
+    modified: datetime
 
 
 def scan_folder(folder_path: str) -> list[ScannedFile]:
@@ -35,12 +37,14 @@ def scan_folder(folder_path: str) -> list[ScannedFile]:
         ext = f.suffix.lower()
         if ext not in SUPPORTED_EXTENSIONS:
             continue
+        stat = f.stat()
         results.append(
             ScannedFile(
                 name=f.name,
                 path=f,
                 file_type=SUPPORTED_EXTENSIONS[ext],
-                size=f.stat().st_size,
+                size=stat.st_size,
+                modified=datetime.fromtimestamp(stat.st_mtime),
             )
         )
     return results

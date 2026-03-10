@@ -186,6 +186,7 @@ def _render_scan_job(job, col_container, label_text: str, job_key: str):
                     [
                         {
                             "File": f.name,
+                            "Date": f.modified.strftime("%Y-%m-%d %H:%M"),
                             "Type": f.file_type.upper(),
                             "Size": f"{f.size / 1024:.1f} KB",
                             "Extracted": f"{len(f.text)} chars" if not f.error else f"Error: {f.error[:50]}",

@@ -188,25 +188,34 @@ for ev in sorted_events:
 
     with st.expander(f":{color}[{impact.upper()}] **{ev['title']}** — {ev['event_date']}{status_suffix}"):
         st.markdown(ev.get("description") or "No description.")
-        st.caption(
-            f"Category: **{category}** · Impact: **{impact}** · "
-            f"Source: [{snap_label}]({''}) ({snap_date})"
-        )
+        st.caption(f"Category: **{category}** · Source: [{snap_label}]({''}) ({snap_date})")
         st.caption(f"From assessment **#{ev['snapshot_id']}** — {snap_label} — run on {snap_date}")
 
-        # Status actions
-        status_cols = st.columns(4)
+        # Impact + status actions
+        IMPACT_OPTIONS = ["high", "medium", "low"]
+        status_cols = st.columns([1, 1, 1, 1, 1])
         with status_cols[0]:
+            current_idx = IMPACT_OPTIONS.index(impact) if impact in IMPACT_OPTIONS else 1
+            new_impact = st.selectbox(
+                "Impact", IMPACT_OPTIONS, index=current_idx, key=f"impact_{ev_id}",
+            )
+            if new_impact != impact:
+                queries.update_watch_event_impact(ev_id, new_impact)
+                st.rerun()
+        with status_cols[1]:
+            st.write("")  # spacing to align buttons
             if ev_status != "active":
                 if st.button("Mark active", key=f"active_{ev_id}"):
                     queries.update_watch_event_status(ev_id, "active")
                     st.rerun()
-        with status_cols[1]:
+        with status_cols[2]:
+            st.write("")
             if ev_status != "low_priority":
                 if st.button("Low priority", key=f"low_{ev_id}"):
                     queries.update_watch_event_status(ev_id, "low_priority")
                     st.rerun()
-        with status_cols[2]:
+        with status_cols[3]:
+            st.write("")
             if ev_status != "archived":
                 if st.button("Archive", key=f"archive_{ev_id}"):
                     queries.update_watch_event_status(ev_id, "archived")

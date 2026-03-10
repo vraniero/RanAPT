@@ -21,7 +21,7 @@ st.markdown(
     "Use the sidebar to navigate:\n"
     "- **New Assessment** — upload documents and run the analysis pipeline\n"
     "- **History** — browse past assessments and download PDF reports\n"
-    "- **Scenarios** — run what-if scenario analyses with the Scenario Analyst agent\n"
+    "- **Agents** — create custom financial agents with their own goals and schedules\n"
     "- **Watch List** — calendar of upcoming market events from the Global Intelligence agent\n"
     "- **Data** — manage asset duplicates and merge rules\n"
     "- **Settings** — configure your API key and preferences"

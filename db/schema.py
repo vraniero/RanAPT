@@ -99,6 +99,29 @@ CREATE TABLE IF NOT EXISTS asset_merges (
     variant_ticker  TEXT,
     created_at      TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS custom_agents (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL,
+    goal            TEXT    NOT NULL,
+    model           TEXT    NOT NULL DEFAULT 'sonnet',
+    schedule_minutes INTEGER,
+    status          TEXT    NOT NULL DEFAULT 'active',
+    created_at      TEXT    NOT NULL,
+    updated_at      TEXT    NOT NULL,
+    last_run_at     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS custom_agent_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id        INTEGER NOT NULL REFERENCES custom_agents(id) ON DELETE CASCADE,
+    created_at      TEXT    NOT NULL,
+    status          TEXT    NOT NULL DEFAULT 'pending',
+    raw_response    TEXT,
+    error_message   TEXT,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER
+);
 """
 
 PRAGMA = "PRAGMA foreign_keys = ON;"

@@ -371,6 +371,14 @@ def get_all_watch_events() -> list[sqlite3.Row]:
     return rows
 
 
+def update_watch_event_impact(event_id: int, impact: str) -> None:
+    """Update a watch event's impact level (high, medium, low)."""
+    conn = get_connection()
+    conn.execute("UPDATE watch_events SET impact=? WHERE id=?", (impact, event_id))
+    conn.commit()
+    conn.close()
+
+
 def update_watch_event_status(event_id: int, status: str) -> None:
     """Update a watch event's status (active, archived, low_priority)."""
     conn = get_connection()
@@ -537,7 +545,165 @@ def get_all_unique_assets() -> list[sqlite3.Row]:
     return rows
 
 
-# ── Scenarios ─────────────────────────────────────────────────────────────────
+# ── Custom Agents ─────────────────────────────────────────────────────────────
+
+def create_custom_agent(
+    name: str, goal: str, model: str = "sonnet",
+    schedule_minutes: Optional[int] = None,
+) -> int:
+    conn = get_connection()
+    now = _now()
+    cur = conn.execute(
+        """INSERT INTO custom_agents (name, goal, model, schedule_minutes, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'active', ?, ?)""",
+        (name, goal, model, schedule_minutes, now, now),
+    )
+    conn.commit()
+    agent_id = cur.lastrowid
+    conn.close()
+    return agent_id
+
+
+def update_custom_agent(
+    agent_id: int, name: str, goal: str, model: str,
+    schedule_minutes: Optional[int] = None,
+) -> None:
+    conn = get_connection()
+    conn.execute(
+        """UPDATE custom_agents SET name=?, goal=?, model=?, schedule_minutes=?, updated_at=?
+           WHERE id=?""",
+        (name, goal, model, schedule_minutes, _now(), agent_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_custom_agent_status(agent_id: int, status: str) -> None:
+    conn = get_connection()
+    conn.execute(
+        "UPDATE custom_agents SET status=?, updated_at=? WHERE id=?",
+        (status, _now(), agent_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_custom_agent_last_run(agent_id: int) -> None:
+    conn = get_connection()
+    conn.execute(
+        "UPDATE custom_agents SET last_run_at=? WHERE id=?",
+        (_now(), agent_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_custom_agent(agent_id: int) -> None:
+    """Delete agent and all its runs (cascade)."""
+    conn = get_connection()
+    conn.execute("DELETE FROM custom_agents WHERE id=?", (agent_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_custom_agent(agent_id: int) -> Optional[sqlite3.Row]:
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM custom_agents WHERE id=?", (agent_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def list_custom_agents(include_archived: bool = False) -> list[sqlite3.Row]:
+    conn = get_connection()
+    if include_archived:
+        rows = conn.execute("SELECT * FROM custom_agents ORDER BY status, name").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM custom_agents WHERE status='active' ORDER BY name"
+        ).fetchall()
+    conn.close()
+    return rows
+
+
+def list_scheduled_custom_agents() -> list[sqlite3.Row]:
+    """Return active agents that have a schedule configured."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM custom_agents WHERE status='active' AND schedule_minutes IS NOT NULL ORDER BY name"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+# ── Custom Agent Runs ────────────────────────────────────────────────────────
+
+def create_custom_agent_run(agent_id: int) -> int:
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO custom_agent_runs (agent_id, created_at, status) VALUES (?, ?, 'pending')",
+        (agent_id, _now()),
+    )
+    conn.commit()
+    run_id = cur.lastrowid
+    conn.close()
+    return run_id
+
+
+def update_custom_agent_run_running(run_id: int) -> None:
+    conn = get_connection()
+    conn.execute("UPDATE custom_agent_runs SET status='running' WHERE id=?", (run_id,))
+    conn.commit()
+    conn.close()
+
+
+def update_custom_agent_run_completed(
+    run_id: int, raw_response: str, input_tokens: int, output_tokens: int,
+) -> None:
+    conn = get_connection()
+    conn.execute(
+        "UPDATE custom_agent_runs SET status='completed', raw_response=?, input_tokens=?, output_tokens=? WHERE id=?",
+        (raw_response, input_tokens, output_tokens, run_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_custom_agent_run_failed(run_id: int, error_message: str) -> None:
+    conn = get_connection()
+    conn.execute(
+        "UPDATE custom_agent_runs SET status='failed', error_message=? WHERE id=?",
+        (error_message, run_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_custom_agent_runs(agent_id: int, limit: int = 50) -> list[sqlite3.Row]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM custom_agent_runs WHERE agent_id=? ORDER BY id DESC LIMIT ?",
+        (agent_id, limit),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def get_custom_agent_run(run_id: int) -> Optional[sqlite3.Row]:
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM custom_agent_runs WHERE id=?", (run_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def delete_custom_agent_runs(agent_id: int) -> None:
+    """Delete all runs for an agent."""
+    conn = get_connection()
+    conn.execute("DELETE FROM custom_agent_runs WHERE agent_id=?", (agent_id,))
+    conn.commit()
+    conn.close()
+
+
+# ── Scenarios (legacy) ───────────────────────────────────────────────────────
 
 def create_scenario(prompt: str, model: str = "sonnet") -> int:
     conn = get_connection()

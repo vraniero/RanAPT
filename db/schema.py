@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS asset_merges (
 CREATE TABLE IF NOT EXISTS custom_agents (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT    NOT NULL,
+    slug            TEXT,
     goal            TEXT    NOT NULL,
     model           TEXT    NOT NULL DEFAULT 'sonnet',
     schedule_minutes INTEGER,
@@ -144,10 +145,18 @@ def init_db() -> None:
         conn.execute("ALTER TABLE snapshots ADD COLUMN real_estate_folder TEXT")
     if "agents_config" not in cols:
         conn.execute("ALTER TABLE snapshots ADD COLUMN agents_config TEXT")
+    # asset_items: add cost_basis_eur column
+    ai_cols = [row[1] for row in conn.execute("PRAGMA table_info(asset_items)").fetchall()]
+    if "cost_basis_eur" not in ai_cols:
+        conn.execute("ALTER TABLE asset_items ADD COLUMN cost_basis_eur REAL")
     # watch_events: add status column
     we_cols = [row[1] for row in conn.execute("PRAGMA table_info(watch_events)").fetchall()]
     if "status" not in we_cols:
         conn.execute("ALTER TABLE watch_events ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+    # custom_agents: add slug column
+    ca_cols = [row[1] for row in conn.execute("PRAGMA table_info(custom_agents)").fetchall()]
+    if "slug" not in ca_cols:
+        conn.execute("ALTER TABLE custom_agents ADD COLUMN slug TEXT")
     conn.commit()
     conn.close()
 

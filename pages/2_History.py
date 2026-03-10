@@ -1,7 +1,7 @@
 import json
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import streamlit as st
@@ -52,7 +52,7 @@ if nw_history:
                 "Date",
                 value=earliest_dt,
                 min_value=earliest_dt,
-                max_value=datetime.utcnow().date(),
+                max_value=datetime.now(timezone.utc).date(),
                 key="nw_custom_date",
             )
 
@@ -85,7 +85,7 @@ if nw_history:
             comparison_date = best[1]["created_at"][:10]
             comparison_snap_id = best[1]["snapshot_id"]
     else:
-        cutoff = datetime.utcnow() - timedelta(days=period_value)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=period_value)
         best = _find_closest(cutoff)
         if best:
             comparison_nw = best[1]["total_value_eur"]
@@ -93,6 +93,13 @@ if nw_history:
             comparison_snap_id = best[1]["snapshot_id"]
 
     _has_comparison = comparison_nw is not None and comparison_nw != 0
+
+    # Calculate after-tax net worth
+    TAX_RATE = 0.26375  # German Abgeltungsteuer
+    unrealized_gains = queries.get_unrealized_gains(latest["snapshot_id"])
+    estimated_tax = unrealized_gains * TAX_RATE
+    after_tax_nw = current_nw - estimated_tax
+    has_cost_basis = queries.get_total_cost_basis(latest["snapshot_id"]) is not None
 
     with col_nw:
         if _has_comparison:
@@ -106,6 +113,10 @@ if nw_history:
             )
         else:
             st.metric(label="Total Net Worth", value=f"\u20ac{current_nw:,.0f}")
+        if has_cost_basis:
+            st.caption(f"After tax (est.): \u20ac{after_tax_nw:,.0f} · Tax on gains: \u20ac{estimated_tax:,.0f}")
+        else:
+            st.caption("After-tax estimate unavailable — no cost basis data")
 
     # Popover outside columns so it can use full page width
     if _has_comparison:

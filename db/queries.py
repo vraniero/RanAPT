@@ -194,13 +194,14 @@ def add_asset_item(
     unit_price: Optional[float] = None,
     total_value_eur: Optional[float] = None,
     percentage: Optional[float] = None,
+    cost_basis_eur: Optional[float] = None,
 ) -> None:
     conn = get_connection()
     conn.execute(
         """INSERT INTO asset_items
-           (snapshot_id, asset_name, ticker, asset_type, currency, quantity, unit_price, total_value_eur, percentage)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (snapshot_id, asset_name, ticker, asset_type, currency, quantity, unit_price, total_value_eur, percentage),
+           (snapshot_id, asset_name, ticker, asset_type, currency, quantity, unit_price, total_value_eur, percentage, cost_basis_eur)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (snapshot_id, asset_name, ticker, asset_type, currency, quantity, unit_price, total_value_eur, percentage, cost_basis_eur),
     )
     conn.commit()
     conn.close()
@@ -246,6 +247,38 @@ def get_net_worth_history() -> list[sqlite3.Row]:
     ).fetchall()
     conn.close()
     return rows
+
+
+def get_unrealized_gains(snapshot_id: int) -> float:
+    """Returns total unrealized capital gains for a snapshot (where cost basis is known)."""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT SUM(total_value_eur - cost_basis_eur) as total_gains
+           FROM asset_items
+           WHERE snapshot_id = ?
+             AND total_value_eur IS NOT NULL
+             AND cost_basis_eur IS NOT NULL
+             AND total_value_eur > cost_basis_eur""",
+        (snapshot_id,),
+    ).fetchone()
+    conn.close()
+    return row["total_gains"] if row and row["total_gains"] else 0.0
+
+
+def get_total_cost_basis(snapshot_id: int) -> float | None:
+    """Returns total cost basis for a snapshot, or None if no cost basis data exists."""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT SUM(cost_basis_eur) as total_cost_basis,
+                  COUNT(cost_basis_eur) as has_basis
+           FROM asset_items
+           WHERE snapshot_id = ? AND total_value_eur IS NOT NULL""",
+        (snapshot_id,),
+    ).fetchone()
+    conn.close()
+    if row and row["has_basis"] and row["has_basis"] > 0:
+        return row["total_cost_basis"]
+    return None
 
 
 def get_resolved_assets(snapshot_id: int) -> list[sqlite3.Row]:
@@ -550,13 +583,14 @@ def get_all_unique_assets() -> list[sqlite3.Row]:
 def create_custom_agent(
     name: str, goal: str, model: str = "sonnet",
     schedule_minutes: Optional[int] = None,
+    slug: Optional[str] = None,
 ) -> int:
     conn = get_connection()
     now = _now()
     cur = conn.execute(
-        """INSERT INTO custom_agents (name, goal, model, schedule_minutes, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'active', ?, ?)""",
-        (name, goal, model, schedule_minutes, now, now),
+        """INSERT INTO custom_agents (name, slug, goal, model, schedule_minutes, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'active', ?, ?)""",
+        (name, slug, goal, model, schedule_minutes, now, now),
     )
     conn.commit()
     agent_id = cur.lastrowid
@@ -567,12 +601,13 @@ def create_custom_agent(
 def update_custom_agent(
     agent_id: int, name: str, goal: str, model: str,
     schedule_minutes: Optional[int] = None,
+    slug: Optional[str] = None,
 ) -> None:
     conn = get_connection()
     conn.execute(
-        """UPDATE custom_agents SET name=?, goal=?, model=?, schedule_minutes=?, updated_at=?
+        """UPDATE custom_agents SET name=?, slug=?, goal=?, model=?, schedule_minutes=?, updated_at=?
            WHERE id=?""",
-        (name, goal, model, schedule_minutes, _now(), agent_id),
+        (name, slug, goal, model, schedule_minutes, _now(), agent_id),
     )
     conn.commit()
     conn.close()

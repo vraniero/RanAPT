@@ -5,6 +5,14 @@ import streamlit as st
 
 from db.schema import init_db
 from db import queries
+from agents.custom_agent_files import (
+    create_agent_files,
+    update_agent_files,
+    archive_agent_files,
+    reactivate_agent_files,
+    delete_agent_files,
+    agent_slug,
+)
 from tasks.agent_scheduler import (
     run_custom_agent,
     get_running_agent_proc,
@@ -69,9 +77,12 @@ with st.expander("Create new agent", icon=":material/add:"):
 
     can_create = bool(new_name and new_name.strip() and new_goal and new_goal.strip())
     if st.button("Create Agent", disabled=not can_create, type="primary"):
-        queries.create_custom_agent(
-            new_name.strip(), new_goal.strip(), new_model, new_schedule,
-        )
+        name = new_name.strip()
+        goal = new_goal.strip()
+        # Create Claude agent .md file + memory directory
+        slug = create_agent_files(name, goal, new_model)
+        # Create DB record with slug reference
+        queries.create_custom_agent(name, goal, new_model, new_schedule, slug=slug)
         if new_schedule is not None and not is_agent_scheduler_running():
             start_agent_scheduler()
         st.rerun()
@@ -95,6 +106,7 @@ for agent in agents:
     a = dict(agent)
     aid = a["id"]
     a_status = a["status"]
+    a_slug = a.get("slug") or agent_slug(a["name"])
     schedule_text = _schedule_label(a.get("schedule_minutes"))
     last_run = (a.get("last_run_at") or "")[:19].replace("T", " ")
 
@@ -138,9 +150,14 @@ for agent in agents:
             col_save, col_cancel = st.columns(2)
             with col_save:
                 if st.button("Save", key=f"save_{aid}", type="primary"):
+                    new_name_val = edit_name.strip()
+                    new_goal_val = edit_goal.strip()
+                    # Update Claude agent .md file (handles rename if name changed)
+                    new_slug = update_agent_files(a["name"], new_name_val, new_goal_val, edit_model)
+                    # Update DB
                     queries.update_custom_agent(
-                        aid, edit_name.strip(), edit_goal.strip(),
-                        edit_model, edit_schedule,
+                        aid, new_name_val, new_goal_val,
+                        edit_model, edit_schedule, slug=new_slug,
                     )
                     st.session_state[editing_key] = False
                     if edit_schedule is not None and not is_agent_scheduler_running():
@@ -153,6 +170,7 @@ for agent in agents:
         else:
             # View mode
             st.markdown(f"**Goal:** {a['goal']}")
+            st.caption(f"Agent file: `.claude/agents/{a_slug}.md`")
             if last_run:
                 st.caption(f"Last run: {last_run}")
             st.caption(f"Created: {a['created_at'][:19].replace('T', ' ')}")
@@ -177,10 +195,12 @@ for agent in agents:
             with col_status:
                 if a_status == "active":
                     if st.button("Archive", key=f"archive_{aid}"):
+                        archive_agent_files(a["name"])
                         queries.update_custom_agent_status(aid, "archived")
                         st.rerun()
                 else:
                     if st.button("Reactivate", key=f"reactivate_{aid}"):
+                        reactivate_agent_files(a["name"], a["goal"], a["model"])
                         queries.update_custom_agent_status(aid, "active")
                         st.rerun()
             with col_delete:
@@ -191,10 +211,15 @@ for agent in agents:
             if st.session_state.get(f"confirm_del_agent_{aid}"):
                 @st.dialog(f"Delete {a['name']}?")
                 def _confirm_delete(agent_id=aid, agent_name=a["name"]):
-                    st.warning(f"This will permanently delete **{agent_name}** and all its run history. This cannot be undone.")
+                    st.warning(
+                        f"This will permanently delete **{agent_name}**, "
+                        f"its Claude agent file, memory directory, and all run history. "
+                        f"This cannot be undone."
+                    )
                     c1, c2 = st.columns(2)
                     with c1:
                         if st.button("Yes, delete", key=f"yes_del_agent_{agent_id}", type="primary"):
+                            delete_agent_files(agent_name)
                             queries.delete_custom_agent(agent_id)
                             del st.session_state[f"confirm_del_agent_{agent_id}"]
                             st.rerun()

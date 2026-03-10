@@ -1,7 +1,8 @@
 """Scheduler for user-created custom agents.
 
 Runs a single daemon thread that checks all active agents with a schedule,
-and executes them when they are due.
+and executes them when they are due. Each custom agent has a corresponding
+.md file in .claude/agents/ and a memory directory in .claude/agent-memory/.
 """
 
 import threading
@@ -10,6 +11,7 @@ from datetime import datetime, timezone
 
 from db import queries
 from agents.runner import AgentProcess
+from agents.custom_agent_files import get_system_prompt, agent_md_exists
 
 
 _scheduler_thread: threading.Thread | None = None
@@ -24,16 +26,6 @@ _running_lock = threading.Lock()
 def get_running_agent_proc(agent_id: int) -> AgentProcess | None:
     with _running_lock:
         return _running_agents.get(agent_id)
-
-
-def _build_system_prompt(agent) -> str:
-    """Build a system prompt from the agent's goal."""
-    return (
-        f"You are a financial analysis agent named '{agent['name']}'.\n\n"
-        f"Your goal:\n{agent['goal']}\n\n"
-        "You have access to the investor's portfolio context below (if provided). "
-        "Provide clear, actionable analysis. Use markdown formatting."
-    )
 
 
 def _build_user_message(agent) -> str:
@@ -64,11 +56,23 @@ def run_custom_agent(agent_id: int) -> None:
     run_id = queries.create_custom_agent_run(agent_id)
     queries.update_custom_agent_run_running(run_id)
 
-    system_prompt = _build_system_prompt(agent)
+    # Load system prompt from the agent's .md file
+    agent_name = agent["name"]
+    if agent_md_exists(agent_name):
+        system_prompt = get_system_prompt(agent_name)
+    else:
+        # Fallback if .md file doesn't exist yet
+        system_prompt = (
+            f"You are a financial analysis agent named '{agent_name}'.\n\n"
+            f"Your goal:\n{agent['goal']}\n\n"
+            "Provide clear, actionable analysis. Use markdown formatting."
+        )
+
     user_message = _build_user_message(agent)
     model = agent["model"]
+    slug = agent["slug"] or f"custom-{agent_name}"
 
-    proc = AgentProcess(f"custom-{agent['name']}", system_prompt, user_message, model=model)
+    proc = AgentProcess(slug, system_prompt, user_message, model=model)
 
     with _running_lock:
         _running_agents[agent_id] = proc

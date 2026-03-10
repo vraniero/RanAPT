@@ -7,12 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Two things coexist here:
 
 1. **Claude Code agent workspace** (`.claude/agents/`) — three sub-agent definitions that Claude Code routes user requests to interactively
-2. **RanAPT Streamlit app** (`app.py`, `pages/`, `db/`, `agents/`, etc.) — a Python app that runs those same agents locally via the `claude` CLI to perform batch portfolio assessments
+2. **RanAPT Streamlit app** (`Home.py`, `pages/`, `db/`, `agents/`, etc.) — a Python app that runs those same agents locally via the `claude` CLI to perform batch portfolio assessments
 
 ## Running the app
 
 ```bash
-streamlit run app.py
+streamlit run Home.py
 ```
 
 Install dependencies first if needed:

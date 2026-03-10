@@ -40,7 +40,7 @@ pip3 install streamlit plotly pandas python-dateutil pdfplumber reportlab openpy
 ./bootstrap-agents.sh
 
 # Run the app
-streamlit run app.py
+streamlit run Home.py
 ```
 
 The bootstrap script deletes any existing agents and recreates them from scratch with the correct prompts. Run it whenever you clone the repo or need to reset agent definitions.
@@ -49,7 +49,7 @@ The bootstrap script deletes any existing agents and recreates them from scratch
 
 ```
 RanAPT/
-├── app.py                     # Streamlit entry point
+├── Home.py                    # Streamlit entry point
 ├── config.py                  # Paths and constants
 ├── db/
 │   ├── schema.py              # DDL, init_db(), get_connection()

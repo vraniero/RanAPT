@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -6,6 +8,8 @@ import streamlit as st
 
 from db.schema import init_db
 from db import queries
+from agents.loader import load_system_prompt, load_agent_model
+from agents.runner import AgentProcess
 
 init_db()
 
@@ -55,7 +59,16 @@ if nw_history:
     # Find comparison snapshot
     comparison_nw = None
     comparison_date = None
+    comparison_snap_id = None
     period_value = PERIOD_OPTIONS[period_label]
+
+    def _find_closest(cutoff_dt):
+        best = None
+        for row in nw_history[:-1]:
+            row_dt = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00").replace("+00:00", ""))
+            if best is None or abs((row_dt - cutoff_dt).total_seconds()) < abs((best[0] - cutoff_dt).total_seconds()):
+                best = (row_dt, row)
+        return best
 
     if period_value is None:
         # "Previous" — just the second-to-last snapshot
@@ -63,31 +76,26 @@ if nw_history:
             prev = nw_history[-2]
             comparison_nw = prev["total_value_eur"]
             comparison_date = prev["created_at"][:10]
+            comparison_snap_id = prev["snapshot_id"]
     elif period_value == "custom":
-        # Custom date — find the snapshot closest to the picked date
         cutoff = datetime.combine(custom_date, datetime.min.time())
-        best = None
-        for row in nw_history[:-1]:
-            row_dt = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00").replace("+00:00", ""))
-            if best is None or abs((row_dt - cutoff).total_seconds()) < abs((best[0] - cutoff).total_seconds()):
-                best = (row_dt, row)
+        best = _find_closest(cutoff)
         if best:
             comparison_nw = best[1]["total_value_eur"]
             comparison_date = best[1]["created_at"][:10]
+            comparison_snap_id = best[1]["snapshot_id"]
     else:
-        # Find the snapshot closest to (now - days)
         cutoff = datetime.utcnow() - timedelta(days=period_value)
-        best = None
-        for row in nw_history[:-1]:  # exclude latest
-            row_dt = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00").replace("+00:00", ""))
-            if best is None or abs((row_dt - cutoff).total_seconds()) < abs((best[0] - cutoff).total_seconds()):
-                best = (row_dt, row)
+        best = _find_closest(cutoff)
         if best:
             comparison_nw = best[1]["total_value_eur"]
             comparison_date = best[1]["created_at"][:10]
+            comparison_snap_id = best[1]["snapshot_id"]
+
+    _has_comparison = comparison_nw is not None and comparison_nw != 0
 
     with col_nw:
-        if comparison_nw is not None and comparison_nw != 0:
+        if _has_comparison:
             delta = current_nw - comparison_nw
             delta_pct = (delta / comparison_nw) * 100
             color = "green" if delta >= 0 else "red"
@@ -96,11 +104,141 @@ if nw_history:
                 label="Total Net Worth",
                 value=f"\u20ac{current_nw:,.0f}",
             )
-            st.markdown(
-                f":{color}[{arrow} \u20ac{delta:+,.0f} ({delta_pct:+.1f}%) vs {comparison_date}]"
-            )
         else:
             st.metric(label="Total Net Worth", value=f"\u20ac{current_nw:,.0f}")
+
+    # Popover outside columns so it can use full page width
+    if _has_comparison:
+        with st.popover(f":{color}[{arrow} \u20ac{delta:+,.0f} ({delta_pct:+.1f}%) vs {comparison_date}]", use_container_width=True):
+            import pandas as pd
+            latest_assets = {r["asset_name"]: r for r in queries.get_resolved_assets(latest["snapshot_id"])}
+            prev_assets = {r["asset_name"]: r for r in queries.get_resolved_assets(comparison_snap_id)}
+            all_names = sorted(set(latest_assets) | set(prev_assets))
+            rows = []
+            for name in all_names:
+                cur_val = latest_assets[name]["total_value_eur"] if name in latest_assets else 0
+                prev_val = prev_assets[name]["total_value_eur"] if name in prev_assets else 0
+                asset_delta = cur_val - prev_val
+                ticker = (latest_assets.get(name) or prev_assets.get(name))["ticker"] or ""
+                display = ticker if ticker else name
+                rows.append({
+                    "Asset": display,
+                    comparison_date: prev_val,
+                    "Now": cur_val,
+                    "\u0394": asset_delta,
+                })
+            rows.sort(key=lambda r: r["\u0394"], reverse=True)
+            df = pd.DataFrame(rows)
+            st.dataframe(
+                df.style.format({
+                    comparison_date: "\u20ac{:,.0f}",
+                    "Now": "\u20ac{:,.0f}",
+                    "\u0394": "\u20ac{:+,.0f}",
+                }).map(
+                    lambda v: "color: green" if v > 0 else ("color: red" if v < 0 else ""),
+                    subset=["\u0394"],
+                ),
+                hide_index=True, use_container_width=True,
+            )
+
+    # ── Ask about net worth changes ─────────────────────────────────────────
+    if _has_comparison:
+        st.subheader("Ask the agents")
+
+        MODEL_OPTIONS = ["haiku", "sonnet", "opus"]
+        _default_model = load_agent_model("scenario-analyst")
+
+        col_q, col_qmodel = st.columns([4, 1])
+        with col_qmodel:
+            nw_q_model = st.selectbox(
+                "Model", MODEL_OPTIONS,
+                index=MODEL_OPTIONS.index(_default_model) if _default_model in MODEL_OPTIONS else 1,
+                key="nw_q_model",
+            )
+        with col_q:
+            nw_question = st.text_input(
+                "Question",
+                placeholder="Why did my net worth change? Which assets contributed the most?",
+                key="nw_question",
+            )
+
+        if st.button("Ask", disabled=not nw_question, type="primary", key="nw_q_ask"):
+            # Build context: asset deltas + agent reports from both snapshots
+            import pandas as pd
+            latest_assets = {r["asset_name"]: r for r in queries.get_resolved_assets(latest["snapshot_id"])}
+            prev_assets = {r["asset_name"]: r for r in queries.get_resolved_assets(comparison_snap_id)}
+            all_names = sorted(set(latest_assets) | set(prev_assets))
+
+            delta_lines = [f"Period: {comparison_date} -> now", f"Total net worth: €{comparison_nw:,.0f} -> €{current_nw:,.0f} (Δ €{delta:+,.0f}, {delta_pct:+.1f}%)", "", "Per-asset breakdown:"]
+            for name in all_names:
+                cur_val = latest_assets[name]["total_value_eur"] if name in latest_assets else 0
+                prev_val = prev_assets[name]["total_value_eur"] if name in prev_assets else 0
+                ad = cur_val - prev_val
+                ticker = (latest_assets.get(name) or prev_assets.get(name))["ticker"] or ""
+                display = f"{name} ({ticker})" if ticker else name
+                delta_lines.append(f"  {display}: €{prev_val:,.0f} -> €{cur_val:,.0f} (Δ €{ad:+,.0f})")
+
+            context_parts = ["\n".join(delta_lines)]
+
+            # Add asset-reader reports from both snapshots for richer context
+            for snap_id, snap_label in [(comparison_snap_id, f"Assessment from {comparison_date}"), (latest["snapshot_id"], "Latest assessment")]:
+                ar_result = queries.get_agent_result_by_name(snap_id, "asset-reader")
+                if ar_result and ar_result["raw_response"]:
+                    context_parts.append(f"=== {snap_label} — Asset Reader report ===\n{ar_result['raw_response']}")
+                gfi_result = queries.get_agent_result_by_name(snap_id, "global-financial-intelligence")
+                if gfi_result and gfi_result["raw_response"]:
+                    context_parts.append(f"=== {snap_label} — Global Intelligence report ===\n{gfi_result['raw_response']}")
+
+            system_prompt = load_system_prompt("scenario-analyst")
+            user_message = nw_question.strip() + "\n\n" + "\n\n".join(context_parts)
+
+            proc = AgentProcess("scenario-analyst", system_prompt, user_message, model=nw_q_model)
+            st.session_state["nw_q_proc"] = proc
+            st.session_state["nw_q_running"] = True
+            st.session_state["nw_q_result"] = None
+
+            def _run_nw_q():
+                proc.run()
+                st.session_state["nw_q_running"] = False
+
+            t = threading.Thread(target=_run_nw_q, daemon=True)
+            t.start()
+            st.session_state["nw_q_thread"] = t
+            st.rerun()
+
+        # Live monitor
+        if st.session_state.get("nw_q_running"):
+            proc = st.session_state.get("nw_q_proc")
+            thread = st.session_state.get("nw_q_thread")
+            st.info("Analyzing...")
+            if proc:
+                log = proc.activity_log
+                if log:
+                    with st.expander("Activity"):
+                        st.code("\n".join(log[-20:]), language=None)
+            if thread and thread.is_alive():
+                time.sleep(2)
+                st.rerun()
+            else:
+                # Done
+                result = proc.get_result()
+                st.session_state["nw_q_running"] = False
+                st.session_state["nw_q_result"] = result
+                st.rerun()
+
+        # Show result
+        nw_q_result = st.session_state.get("nw_q_result")
+        if nw_q_result:
+            if nw_q_result["success"]:
+                st.markdown(nw_q_result["raw_response"])
+                tokens_in = nw_q_result.get("input_tokens", 0)
+                tokens_out = nw_q_result.get("output_tokens", 0)
+                st.caption(f"Tokens: {tokens_in:,} in / {tokens_out:,} out")
+            else:
+                st.error(f"Failed: {nw_q_result.get('error', 'Unknown error')}")
+            if st.button("Clear", key="nw_q_clear"):
+                st.session_state.pop("nw_q_result", None)
+                st.rerun()
 
     st.divider()
 

@@ -248,6 +248,38 @@ def get_net_worth_history() -> list[sqlite3.Row]:
     return rows
 
 
+def get_resolved_assets(snapshot_id: int) -> list[sqlite3.Row]:
+    """Returns assets for a snapshot with merge rules applied (grouped by resolved name)."""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT resolved_name as asset_name,
+                  resolved_ticker as ticker,
+                  asset_type,
+                  SUM(total_value_eur) as total_value_eur
+           FROM (
+               SELECT COALESCE(
+                          (SELECT m.canonical_name FROM asset_merges m
+                           WHERE m.variant_name = a.asset_name LIMIT 1),
+                          a.asset_name, 'Unknown'
+                      ) as resolved_name,
+                      COALESCE(
+                          (SELECT m.canonical_ticker FROM asset_merges m
+                           WHERE m.variant_name = a.asset_name LIMIT 1),
+                          a.ticker, ''
+                      ) as resolved_ticker,
+                      COALESCE(a.asset_type, 'Other') as asset_type,
+                      a.total_value_eur
+               FROM asset_items a
+               WHERE a.snapshot_id = ? AND a.total_value_eur IS NOT NULL
+           )
+           GROUP BY resolved_name
+           ORDER BY total_value_eur DESC""",
+        (snapshot_id,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 def get_portfolio_breakdown_over_time() -> list[sqlite3.Row]:
     """Returns (snapshot_id, created_at, label, asset_type, type_value_eur) per snapshot+type."""
     conn = get_connection()
